@@ -1,0 +1,3 @@
+[submodule "schedule/ai-deadlines"]
+	path = schedule/ai-deadlines
+	url = https://github.com/paperswithcode/ai-deadlines/
