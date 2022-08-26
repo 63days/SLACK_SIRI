@@ -11,6 +11,11 @@ import pytz
 from yaml import CLoader as Loader, CDumper as Dumper
 from yaml.representer import SafeRepresenter
 from typing import List
+from flask import Flask, request, Response
+from threading import Thread
+
+
+app = Flask("")
 
 _mapping_tag = yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG
 
@@ -28,8 +33,11 @@ Loader.add_constructor(_mapping_tag, dict_constructor)
 
 Dumper.add_representer(str, SafeRepresenter.represent_str)
 
+alarm_hour = 3
 
-dateformat = "%Y-%m-%d %H:%M:%S"
+current_year = 2022
+
+dateformat = "%Y-%m-%d %H:%M"
 tba_words = ["tba", "tbd"]
 subfield2fullname = {
     "CV": "Computer Vision",
@@ -42,7 +50,13 @@ subfield2fullname = {
 }
 
 
-def get_now():
+def get_now(kst=False):
+    if kst:
+        return (
+            datetime.datetime.utcnow()
+            .replace(tzinfo=pytz.timezone("UTC")).replace(microsecond=0)
+            .astimezone(pytz.timezone("Asia/Seoul")).strftime(dateformat)
+        )
     return datetime.datetime.utcnow().replace(microsecond=0).strftime(dateformat)
 
 
@@ -65,6 +79,7 @@ class Calendar:
         tba = [x for x in data if str(x["deadline"]).lower() in tba_words]
 
         right_now = get_now()
+        # sorting
         conf.sort(
             key=lambda x: pytz.utc.normalize(
                 datetime.datetime.strptime(x["deadline"], dateformat).replace(
@@ -72,44 +87,104 @@ class Calendar:
                 )
             )
         )
+        # clear past conferences
         conf_remaining = []
         for q in conf:
             if q["deadline"] > right_now:
                 conf_remaining.append(q)
 
+        # to KST
+        for q in conf_remaining:
+            original_date = datetime.datetime.strptime(
+                q["deadline"], dateformat
+            ).replace(tzinfo=pytz.timezone(q["timezone"]))
+            kst_tz = pytz.timezone("Asia/Seoul")
+            kst_date = original_date.astimezone(kst_tz)
+            q["kst_deadline"] = kst_date.strftime(dateformat)
+
+            if q.get("abstract_deadline"):
+                original_date = datetime.datetime.strptime(
+                    q["abstract_deadline"], dateformat
+                ).replace(tzinfo=pytz.timezone(q["timezone"]))
+                kst_date = original_date.astimezone(kst_tz)
+                q["kst_abstract_deadline"] = kst_date.strftime(dateformat)
+
         self.conf = conf_remaining
         self.tba = tba
 
     def conference_info_message(self, q):
+        today = get_now()
         title = q["title"]
         subfield = q["sub"]
         deadline = q["deadline"]
+        day_diff = datetime.datetime.strptime(
+            deadline, dateformat
+        ) - datetime.datetime.strptime(today, dateformat)
+        d_day = day_diff.days
+        seconds = day_diff.seconds
+        remaining_hours = seconds // 3600
+        remaining_minutes = (seconds - remaining_hours * 3600) // 60
+        if d_day == 0:
+            d_day_msg = f"D-0 {remaining_hours}:{remaining_minutes}"
+        else:
+            d_day_msg = f"D-{d_day}"
+
         timezone = q["timezone"]
         place = q["place"]
 
-        msg = f"<{title}> {subfield2fullname[subfield]}\n"
-        # msg += f"{subfield}\n"
-        msg += f"Deadline: {deadline} ({timezone})\n"
+        msg = f"*[{title}]* {subfield2fullname[subfield]}\n"
+        msg += f"- Deadline: *{d_day_msg}*. {deadline.replace(str(current_year)+'-', '').replace('-', '/')} ({timezone})\n"
+
         if q.get("abstract_deadline"):
-            msg += f"Abstract Deadline: {q['abstract_deadline']}\n"
-        msg += f"Place: {place}\n"
+            msg += f"- Abstract Deadline: {q['abstract_deadline'].replace(str(current_year)+'-', '').replace('-', '/')}\n"
+        msg += f"- Place: {place}\n\n"
+
+        return msg
+
+    def conference_info_message_kst(self, q):
+        today = get_now(kst=True)
+
+        title = q["title"]
+        subfield = q["sub"]
+        deadline = q["kst_deadline"]
+        day_diff = datetime.datetime.strptime(
+            deadline, dateformat
+        ) - datetime.datetime.strptime(today, dateformat)
+        d_day = day_diff.days
+        seconds = day_diff.seconds
+        remaining_hours = seconds // 3600
+        remaining_minutes = (seconds - remaining_hours * 3600) // 60
+        if d_day == 0:
+            d_day_msg = f"D-0 {remaining_hours}:{remaining_minutes}"
+        else:
+            d_day_msg = f"D-{d_day}"
+
+        timezone = "KST"
+        place = q["place"]
+
+        msg = f"*[{title}]* {subfield2fullname[subfield]}\n"
+        msg += f"- Deadline: *{d_day_msg}*. {deadline.replace('2022-', '').replace('-', '/')} ({timezone})\n"
+
+        if q.get("kst_abstract_deadline"):
+            msg += f"- Abstract Deadline: {q['kst_abstract_deadline'].replace('2022-', '').replace('-', '/')}\n"
+        msg += f"- Place: {place}\n\n"
 
         return msg
 
     def padding_time(self, strtime):
         num_parser = len(strtime.split(":"))
         if num_parser == 3:
-            return strtime
+            return strtime[:-3]
         elif num_parser == 2:
-            return strtime + ":59"
-        elif num_parser == 1:
-            return strtime + ":59:59"
+            return strtime
         else:
             raise ValueError
 
     def fix_data(self, data):
         for x in data:
             x["deadline"] = self.padding_time(x["deadline"])
+            if x.get("abstract_deadline"):
+                x["abstract_deadline"] = self.padding_time(x["abstract_deadline"])
             x["timezone"] = (
                 x["timezone"]
                 .replace("UTC+", "Etc/GMT-")
@@ -154,7 +229,7 @@ class SlackBot:
             self.name2id = invert_dictionary(self.id2name)
             self.real_name2id = invert_dictionary(self.id2real_name)
 
-    def get_deadlines(self, subfields: List = ["CV", "CG", "ML"]):
+    def get_deadlines(self, interesting_confs, subfields: List = ["CV", "CG", "ML"]):
         """
         subfileds: [
         "ML":Machline Learning,
@@ -166,10 +241,20 @@ class SlackBot:
         "DM": Data Mining
         ]
         """
-        msg = "==== 2022 Deadlines ====\n"
-        for q in self.calendar.conf:
-            if q["sub"] in subfields:
-                msg += self.calendar.conference_info_message(q)
+        kst_today = get_now(kst=True)
+        msg = f"Good morning! :wave: Today is *{kst_today[:10].replace(str(current_year)+'-', '').replace('-', '/')}*\n"
+        if interesting_confs is not None:
+
+            for q in self.calendar.conf:
+                if q["title"] in interesting_confs:
+                    msg += self.calendar.conference_info_message_kst(q)
+                    # msg += self.calendar.conference_info_message_kst(q)
+        else:
+            for q in self.calendar.conf:
+                if q["sub"] in subfields:
+                    msg += self.calendar.conference_info_message_kst(q)
+                    # msg += self.calendar.conference_info_message(q)
+
         return msg
 
     def send_dm(self, name, msg):
@@ -180,15 +265,33 @@ class SlackBot:
         channel_id = self.get_channel_id(channel_name)
         self.client.chat_postMessage(channel=channel_id, text=msg)
 
+    @app.route("/deadlines", methods=["POST"])
+    def hello_slash():
+        pass
+        # query_word = request.form['text']
+        # user = request.form['user_id']
+        # ts = ''
+        # answer = get_answer(query_word, user, ts)
+
+        # return make_response(answer, 200, {"content_type": "application/json"})
+
 
 def main():
     env_path = Path("../") / ".env"
     load_dotenv(env_path)
 
     slack = SlackBot(os.environ["SLACK_TOKEN"])
+    
+    while True:
+        nowtime = time.localtime()
+        if nowtime.tm_hour == alarm_hour:
 
-    deadlines = slack.get_deadlines()
-    slack.post_message("deadlines", deadlines)
+            deadlines = slack.get_deadlines(["ICLR", "CVPR", "ICCV"])
+            slack.post_message("deadlines", deadlines)
+            print(deadlines)
+        
+        time.sleep(3600)
+
 
 
 if __name__ == "__main__":
