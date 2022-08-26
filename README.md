@@ -3,6 +3,6 @@ SLACK BOTs
 
 ## Conference Dates Bot
 ### TODO
-- [ ] interactive bot. Users can configure which conference information they receive.
-- [ ] show D-day.
+- [ ] Implement an interactive bot. Users can configure which conference information they receive.
+- [ ] Show D-day.
 - [ ] Normalize timezones to KST. 
