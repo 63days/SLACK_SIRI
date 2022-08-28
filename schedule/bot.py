@@ -33,7 +33,7 @@ Loader.add_constructor(_mapping_tag, dict_constructor)
 
 Dumper.add_representer(str, SafeRepresenter.represent_str)
 
-alarm_hour = 3
+alarm_hour = 8
 
 current_year = 2022
 
