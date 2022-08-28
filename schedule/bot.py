@@ -115,11 +115,14 @@ class Calendar:
         self.conf = conf_remaining
         self.tba = tba
 
-    def conference_info_message(self, q):
-        today = get_now()
+    def conference_info_message(self, q, kst=False):
+        today = get_now(kst=kst)
         title = q["title"]
         subfield = q["sub"]
-        deadline = q["deadline"]
+        deadline = q["deadline"] if not kst else q["kst_deadline"]
+        timezone = q["timezone"] if not kst else "KST"
+        place = q["place"]
+
         day_diff = datetime.datetime.strptime(
             deadline, dateformat
         ) - datetime.datetime.strptime(today, dateformat)
@@ -127,49 +130,19 @@ class Calendar:
         seconds = day_diff.seconds
         remaining_hours = seconds // 3600
         remaining_minutes = (seconds - remaining_hours * 3600) // 60
-        if d_day == 0:
-            d_day_msg = f"D-0 {remaining_hours}:{remaining_minutes}"
-        else:
-            d_day_msg = f"D-{d_day}"
 
-        timezone = q["timezone"]
-        place = q["place"]
+        if d_day == 0:
+            d_day_msg = f"*D-0 {remaining_hours}:{remaining_minutes}*"
+        else:
+            d_day_msg = f"*D-{d_day}*"
+
+        deadline_msg = deadline.replace(str(current_year)+"-", "").replace("-", "/")+" ("+timezone+")"
 
         msg = f"*[{title}]* {subfield2fullname[subfield]}\n"
-        msg += f"- Deadline: *{d_day_msg}*. {deadline.replace(str(current_year)+'-', '').replace('-', '/')} ({timezone})\n"
+        msg += d_day_msg+". "+deadline_msg+"\n"
 
         if q.get("abstract_deadline"):
             msg += f"- Abstract Deadline: {q['abstract_deadline'].replace(str(current_year)+'-', '').replace('-', '/')}\n"
-        msg += f"- Place: {place}\n\n"
-
-        return msg
-
-    def conference_info_message_kst(self, q):
-        today = get_now(kst=True)
-
-        title = q["title"]
-        subfield = q["sub"]
-        deadline = q["kst_deadline"]
-        day_diff = datetime.datetime.strptime(
-            deadline, dateformat
-        ) - datetime.datetime.strptime(today, dateformat)
-        d_day = day_diff.days
-        seconds = day_diff.seconds
-        remaining_hours = seconds // 3600
-        remaining_minutes = (seconds - remaining_hours * 3600) // 60
-        if d_day == 0:
-            d_day_msg = f"D-0 {remaining_hours}:{remaining_minutes}"
-        else:
-            d_day_msg = f"D-{d_day}"
-
-        timezone = "KST"
-        place = q["place"]
-
-        msg = f"*[{title}]* {subfield2fullname[subfield]}\n"
-        msg += f"- Deadline: *{d_day_msg}*. {deadline.replace('2022-', '').replace('-', '/')} ({timezone})\n"
-
-        if q.get("kst_abstract_deadline"):
-            msg += f"- Abstract Deadline: {q['kst_abstract_deadline'].replace('2022-', '').replace('-', '/')}\n"
         msg += f"- Place: {place}\n\n"
 
         return msg
@@ -250,13 +223,11 @@ class SlackBot:
 
             for q in self.calendar.conf:
                 if q["title"] in interesting_confs:
-                    msg += self.calendar.conference_info_message_kst(q)
-                    # msg += self.calendar.conference_info_message_kst(q)
+                    msg += self.calendar.conference_info_message(q, kst=True)
         else:
             for q in self.calendar.conf:
                 if q["sub"] in subfields:
-                    msg += self.calendar.conference_info_message_kst(q)
-                    # msg += self.calendar.conference_info_message(q)
+                    msg += self.calendar.conference_info_message(q, kst=True)
 
         return msg
 
