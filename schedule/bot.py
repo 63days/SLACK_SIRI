@@ -286,7 +286,7 @@ def main():
         nowtime = time.localtime()
         if nowtime.tm_hour == alarm_hour:
 
-            deadlines = slack.get_deadlines(["ICLR", "CVPR", "ICCV"])
+            deadlines = slack.get_deadlines(["ICLR", "CVPR", "ICCV", "SIGGRAPHASIAConf", "SIGGRAPH", "ICML"])
             slack.post_message("deadlines", deadlines)
             print(deadlines)
         
