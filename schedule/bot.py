@@ -1,4 +1,5 @@
 from slack_sdk import WebClient
+import schedule
 from collections import OrderedDict
 import time
 import time
@@ -54,8 +55,10 @@ def get_now(kst=False):
     if kst:
         return (
             datetime.datetime.utcnow()
-            .replace(tzinfo=pytz.timezone("UTC")).replace(microsecond=0)
-            .astimezone(pytz.timezone("Asia/Seoul")).strftime(dateformat)
+            .replace(tzinfo=pytz.timezone("UTC"))
+            .replace(microsecond=0)
+            .astimezone(pytz.timezone("Asia/Seoul"))
+            .strftime(dateformat)
         )
     return datetime.datetime.utcnow().replace(microsecond=0).strftime(dateformat)
 
@@ -281,17 +284,17 @@ def main():
     load_dotenv(env_path)
 
     slack = SlackBot(os.environ["SLACK_TOKEN"])
-    
+
+    def job():
+        deadlines = slack.get_deadlines(
+            ["ICLR", "CVPR", "ICCV", "SIGGRAPHASIAConf", "SIGGRAPH", "ICML"]
+        )
+        slack.post_message("deadlines", deadlines)
+        print(deadlines)
+
     while True:
-        nowtime = time.localtime()
-        if nowtime.tm_hour == alarm_hour:
-
-            deadlines = slack.get_deadlines(["ICLR", "CVPR", "ICCV", "SIGGRAPHASIAConf", "SIGGRAPH", "ICML"])
-            slack.post_message("deadlines", deadlines)
-            print(deadlines)
-        
-        time.sleep(3600)
-
+        schedule.every().day.at("08:00").do(job)
+        time.sleep(1)
 
 
 if __name__ == "__main__":
