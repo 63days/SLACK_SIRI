@@ -71,8 +71,9 @@ def invert_dictionary(dic):
 
 
 class Calendar:
-    def __init__(self, yml_path):
+    def __init__(self, yml_path, interesting_confs):
         self.yml_path = yml_path
+        self.interesting_confs = interesting_confs
 
         with open(yml_path, "r") as stream:
             data = yaml.load(stream, Loader=Loader)
@@ -90,12 +91,20 @@ class Calendar:
                 )
             )
         )
-        # clear past conferences
+        # clear past conferences that are not in the interesting_confs
+        # among the same conferences, show only the latest one
         conf_remaining = []
-        for q in conf:
-            if q["deadline"] > right_now:
-                conf_remaining.append(q)
+        titles = []
+        for q in reversed(conf):
+            if q["deadline"] < right_now and q["title"] not in self.interesting_confs:
+                continue
+            if q["title"] in titles:
+                continue
 
+            conf_remaining.append(q)
+            titles.append(q["title"])
+
+        conf_remaining = list(reversed(conf_remaining))
         # to KST
         for q in conf_remaining:
             original_date = datetime.datetime.strptime(
@@ -121,6 +130,7 @@ class Calendar:
         subfield = q["sub"]
         deadline = q["deadline"] if not kst else q["kst_deadline"]
         timezone = q["timezone"] if not kst else "KST"
+        date = q["date"]
         place = q["place"]
 
         day_diff = datetime.datetime.strptime(
@@ -133,17 +143,19 @@ class Calendar:
 
         if d_day == 0:
             d_day_msg = f"*D-0 {remaining_hours}:{remaining_minutes}*"
+        elif d_day < 0:
+            d_day_msg = f"*D+{abs(d_day)}*"
         else:
             d_day_msg = f"*D-{d_day}*"
-
+        
         deadline_msg = deadline.replace(str(current_year)+"-", "").replace("-", "/")+" ("+timezone+")"
+        date_msg = f"{date}"
 
         msg = f"*[{title}]* {subfield2fullname[subfield]}\n"
         msg += d_day_msg+". "+deadline_msg+"\n"
-
         if q.get("abstract_deadline"):
             msg += f"- Abstract Deadline: {q['abstract_deadline'].replace(str(current_year)+'-', '').replace('-', '/')}\n"
-        msg += f"- Place: {place}\n\n"
+        msg += f"- Place: {place} ({date_msg})\n\n"
 
         return msg
 
@@ -171,9 +183,9 @@ class Calendar:
 
 
 class SlackBot:
-    def __init__(self, token):
+    def __init__(self, token, interesting_confs):
         self.client = WebClient(token)
-        self.calendar = Calendar("./ai-deadlines/_data/conferences.yml")
+        self.calendar = Calendar("./ai-deadlines/_data/conferences.yml", interesting_confs)
 
         # self.register_memeber_list()
 
@@ -254,17 +266,19 @@ def main():
     env_path = Path("../") / ".env"
     load_dotenv(env_path)
 
-    slack = SlackBot(os.environ["SLACK_TOKEN"])
+    slack = SlackBot(os.environ["SLACK_TOKEN"], ["ICLR", "CVPR", "ICCV", "SIGGRAPHASIAConf", "SIGGRAPH", "ICML"])
 
     def job():
         deadlines = slack.get_deadlines(
             ["ICLR", "CVPR", "ICCV", "SIGGRAPHASIAConf", "SIGGRAPH", "ICML"]
         )
-        slack.post_message("deadlines", deadlines)
+        # slack.post_message("deadlines", deadlines)
         print(deadlines)
+    # job()
 
+    schedule.every().day.at("08:00").do(job)
     while True:
-        schedule.every().day.at("08:00").do(job)
+        schedule.run_pending()
         time.sleep(1)
 
 
