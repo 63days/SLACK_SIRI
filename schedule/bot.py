@@ -15,7 +15,7 @@ from typing import List
 from flask import Flask, request, Response
 from threading import Thread
 
-
+debug = False
 app = Flask("")
 
 _mapping_tag = yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG
@@ -147,12 +147,17 @@ class Calendar:
             d_day_msg = f"*D+{abs(d_day)}*"
         else:
             d_day_msg = f"*D-{d_day}*"
-        
-        deadline_msg = deadline.replace(str(current_year)+"-", "").replace("-", "/")+" ("+timezone+")"
+
+        deadline_msg = (
+            deadline.replace(str(current_year) + "-", "").replace("-", "/")
+            + " ("
+            + timezone
+            + ")"
+        )
         date_msg = f"{date}"
 
         msg = f"*[{title}]* {subfield2fullname[subfield]}\n"
-        msg += d_day_msg+". "+deadline_msg+"\n"
+        msg += d_day_msg + ". " + deadline_msg + "\n"
         if q.get("abstract_deadline"):
             msg += f"- Abstract Deadline: {q['abstract_deadline'].replace(str(current_year)+'-', '').replace('-', '/')}\n"
         msg += f"- Place: {place} ({date_msg})\n\n"
@@ -185,9 +190,10 @@ class Calendar:
 class SlackBot:
     def __init__(self, token, interesting_confs):
         self.client = WebClient(token)
-        self.calendar = Calendar("./ai-deadlines/_data/conferences.yml", interesting_confs)
-
-        # self.register_memeber_list()
+        self.calendar = Calendar(
+            "./ai-deadlines/_data/conferences.yml", interesting_confs
+        )
+        self.register_memeber_list()
 
     def get_channel_id(self, channel_name):
         result = self.client.conversations_list()
@@ -266,20 +272,29 @@ def main():
     env_path = Path("../") / ".env"
     load_dotenv(env_path)
 
-    slack = SlackBot(os.environ["SLACK_TOKEN"], ["ICLR", "CVPR", "ICCV", "SIGGRAPHASIAConf", "SIGGRAPH", "ICML"])
+    slack = SlackBot(
+        os.environ["SLACK_TOKEN"],
+        ["ICLR", "CVPR", "ICCV", "SIGGRAPHASIAConf", "SIGGRAPH", "ICML"],
+    )
 
-    def job():
+    def job(debug):
         deadlines = slack.get_deadlines(
             ["ICLR", "CVPR", "ICCV", "SIGGRAPHASIAConf", "SIGGRAPH", "ICML"]
         )
-        # slack.post_message("deadlines", deadlines)
+        if debug:
+            slack.send_dm("63days", deadlines)
+        else:
+            slack.post_message("deadlines", deadlines)
         print(deadlines)
-    # job()
 
-    schedule.every().day.at("08:00").do(job)
+    if debug:
+        job(debug)
+    else:
+        schedule.every.day.at("08:00").do(job, False)
+
     while True:
         schedule.run_pending()
-        time.sleep(1)
+        time.sleep(10)
 
 
 if __name__ == "__main__":
